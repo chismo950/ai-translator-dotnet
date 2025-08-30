@@ -19,12 +19,9 @@ app.UseExceptionHandling();
 // Request logging after exception handling
 app.UseRequestLogging();
 
-// Swagger only in Development by default
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+// Enable Swagger in all environments for testing
+app.UseSwagger();
+app.UseSwaggerUI();
 
 // NOTE:
 // - Do not force HTTPS redirection since TLS will terminate at your reverse proxy.
