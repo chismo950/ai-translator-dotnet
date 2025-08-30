@@ -4,6 +4,9 @@ using AiTranslatorDotnet.Endpoints;
 using AiTranslatorDotnet.Middleware; // for UseExceptionHandling and UseRequestLogging
 using AiTranslatorDotnet.Security.Turnstile; // for AddTurnstile + MapTurnstileEndpoints
 
+using DotNetEnv;
+Env.TraversePath().Load(".env.local");
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add Swagger (useful for local testing and API docs)
