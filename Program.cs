@@ -11,6 +11,9 @@ builder.Services.AddSwaggerGen();
 // Register Gemini translator services (options + HttpClient + GeminiClient)
 builder.Services.AddGeminiTranslator(builder.Configuration);
 
+// Register CORS configuration
+builder.Services.AddCorsConfiguration(builder.Configuration);
+
 var app = builder.Build();
 
 // Global exception handling should be as early as possible
@@ -18,6 +21,9 @@ app.UseExceptionHandling();
 
 // Request logging after exception handling
 app.UseRequestLogging();
+
+// Enable CORS
+app.UseCors();
 
 // Enable Swagger in all environments for testing
 app.UseSwagger();

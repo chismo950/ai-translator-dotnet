@@ -34,9 +34,10 @@ namespace AiTranslatorDotnet.Configuration.Options
 
         /// <summary>
         /// HTTP timeout (in seconds) for the outbound Gemini request.
-        /// This will typically be applied to the HttpClient configured for the Gemini client.
+        /// DEPRECATED: Use global TimeoutOptions instead. This property is kept for backward compatibility.
+        /// If not set (null or <= 0), will fall back to global timeout configuration.
         /// </summary>
-        public int HttpTimeoutSeconds { get; set; } = 15;
+        public int? HttpTimeoutSeconds { get; set; }
 
         /// <summary>
         /// Optional maximum input length (characters) you allow per call before rejecting.
@@ -47,10 +48,13 @@ namespace AiTranslatorDotnet.Configuration.Options
 
         /// <summary>
         /// Returns a normalized TimeSpan for HttpClient timeouts.
-        /// Clamped between 1s and 100s to avoid extreme values.
+        /// Uses global timeout configuration if HttpTimeoutSeconds is not set.
         /// </summary>
-        public TimeSpan HttpTimeout =>
-            TimeSpan.FromSeconds(Math.Clamp(HttpTimeoutSeconds, 1, 100));
+        public TimeSpan GetHttpTimeout(TimeoutOptions? globalTimeout = null)
+        {
+            var timeoutSeconds = HttpTimeoutSeconds ?? globalTimeout?.HttpTimeoutSeconds ?? 60;
+            return TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 300));
+        }
 
         /// <summary>
         /// Normalize values and clamp to safe ranges.
@@ -67,7 +71,7 @@ namespace AiTranslatorDotnet.Configuration.Options
             if (Temperature < 0) Temperature = 0;
             if (Temperature > 1) Temperature = 1;
 
-            if (HttpTimeoutSeconds <= 0) HttpTimeoutSeconds = 15;
+            // HttpTimeoutSeconds is now nullable, skip normalization here
         }
 
         /// <summary>

@@ -17,6 +17,12 @@ namespace AiTranslatorDotnet.Configuration
         /// </summary>
         public static IServiceCollection AddGeminiTranslator(this IServiceCollection services, IConfiguration configuration)
         {
+            // Bind and validate global timeout options
+            services
+                .AddOptions<TimeoutOptions>()
+                .Bind(configuration.GetSection(TimeoutOptions.SectionName))
+                .PostConfigure(o => o.Normalize());
+
             // Bind and validate Gemini options
             services
                 .AddOptions<GeminiOptions>()
@@ -40,15 +46,55 @@ namespace AiTranslatorDotnet.Configuration
             services.AddHttpClient<GeminiClient>((sp, http) =>
             {
                 var opts = sp.GetRequiredService<IOptions<GeminiOptions>>().Value;
+                var timeoutOpts = sp.GetRequiredService<IOptions<TimeoutOptions>>().Value;
 
-                // Timeout is driven by options
-                http.Timeout = opts.HttpTimeout;
+                // Timeout is driven by global timeout configuration with Gemini-specific override
+                http.Timeout = opts.GetHttpTimeout(timeoutOpts);
 
                 // Default headers
                 http.DefaultRequestHeaders.Accept.Clear();
                 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
                 // Do NOT set the API key header here; it is injected per-request in GeminiClient.
                 // Do NOT set BaseAddress; GeminiClient composes the full URL per call.
+            });
+
+            return services;
+        }
+
+        /// <summary>
+        /// Registers CORS configuration for allowed domain suffixes.
+        /// </summary>
+        public static IServiceCollection AddCorsConfiguration(this IServiceCollection services, IConfiguration configuration)
+        {
+            // Bind CORS options
+            services
+                .AddOptions<CorsOptions>()
+                .Bind(configuration.GetSection(CorsOptions.SectionName));
+
+            services.AddCors(options =>
+            {
+                options.AddDefaultPolicy(policy =>
+                {
+                    var corsOptions = configuration.GetSection(CorsOptions.SectionName).Get<CorsOptions>();
+                    
+                    policy.SetIsOriginAllowed(origin =>
+                    {
+                        if (string.IsNullOrEmpty(origin))
+                            return false;
+
+                        var uri = new Uri(origin);
+                        var host = uri.Host.ToLowerInvariant();
+
+                        return corsOptions?.AllowedOriginSuffixes?.Any(suffix =>
+                            host == suffix.ToLowerInvariant() || 
+                            host.EndsWith($".{suffix.ToLowerInvariant()}")
+                        ) ?? false;
+                    });
+
+                    policy.AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials();
+                });
             });
 
             return services;
