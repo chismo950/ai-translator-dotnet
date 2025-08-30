@@ -4,13 +4,21 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>ai_translator_dotnet</RootNamespace>
+
+    <!-- Keep namespaces consistent with your C# files -->
+    <RootNamespace>AiTranslatorDotnet</RootNamespace>
+    <AssemblyName>AiTranslatorDotnet</AssemblyName>
+
+    <!-- Optional: smaller globalization ICU in containers -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="dotenv.net" Version="4.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.19" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
-  </ItemGroup>
+  <!--
+    If your original template included Swashbuckle, it will appear here as:
+    <ItemGroup>
+      <PackageReference Include="Swashbuckle.AspNetCore" Version="x.y.z" />
+    </ItemGroup>
+    Keep it as-is. No extra packages are required by the current code.
+  -->
 
 </Project>

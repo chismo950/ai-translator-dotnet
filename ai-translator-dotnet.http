@@ -1,6 +1,36 @@
-@ai_translator_dotnet_HostAddress = http://localhost:5129
+@baseUrl = http://localhost:8080
 
-GET {{ai_translator_dotnet_HostAddress}}/weatherforecast/
-Accept: application/json
+### Health check
+GET {{baseUrl}}/health
 
-###
+### Translate (auto-detect source language)
+POST {{baseUrl}}/v1/translate
+Content-Type: application/json
+X-Request-Id: demo-auto-detect-001
+
+{
+  "text": "Bonjour tout le monde!",
+  "targetLang": "en"
+}
+
+### Translate (explicit source language)
+POST {{baseUrl}}/v1/translate
+Content-Type: application/json
+X-Request-Id: demo-explicit-001
+
+{
+  "text": "Guten Morgen, wie geht's?",
+  "sourceLang": "de",
+  "targetLang": "en"
+}
+
+### Translate (multi-line content, preserve line breaks)
+POST {{baseUrl}}/v1/translate
+Content-Type: application/json
+X-Request-Id: demo-multiline-001
+
+{
+  "text": "Line 1: Hello\nLine 2: This is a test.\n{name} should remain as a placeholder.",
+  "sourceLang": "en",
+  "targetLang": "ja"
+}
