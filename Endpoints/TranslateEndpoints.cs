@@ -1,6 +1,7 @@
 using AiTranslatorDotnet.Configuration.Options;
 using AiTranslatorDotnet.Contracts;
 using AiTranslatorDotnet.Gemini;
+using AiTranslatorDotnet.Security.Turnstile; // Turnstile filter
 using Microsoft.Extensions.Options;
 
 namespace AiTranslatorDotnet.Endpoints
@@ -23,7 +24,8 @@ namespace AiTranslatorDotnet.Endpoints
                  .WithName("Translate")
                  .Produces<TranslateResponse>(StatusCodes.Status200OK)
                  .Produces(StatusCodes.Status400BadRequest)
-                 .ProducesProblem(StatusCodes.Status500InternalServerError);
+                 .ProducesProblem(StatusCodes.Status500InternalServerError)
+                 .RequireTurnstile(); // enforce Turnstile verification
 
             return app;
         }

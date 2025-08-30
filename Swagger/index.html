@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>API Docs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Swagger UI assets served by Swashbuckle at /swagger/* -->
+    <link rel="stylesheet" type="text/css" href="/swagger/swagger-ui.css" />
+
+    <style>
+      /* Place a small Turnstile panel in the Swagger topbar */
+      .turnstile-panel {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: 16px;
+      }
+      .turnstile-status {
+        font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
+          Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+        color: #444;
+        opacity: 0.9;
+      }
+      .ts-ok {
+        color: #137333;
+      }
+      .ts-warn {
+        color: #a94442;
+      }
+      .ts-muted {
+        color: #666;
+      }
+      /* Keep widget compact */
+      .cf-turnstile {
+        transform: scale(0.95);
+        transform-origin: left center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+
+    <!-- Turnstile API will be loaded dynamically (so we can fetch siteKey first) -->
+
+    <script
+      src="/swagger/swagger-ui-bundle.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="/swagger/swagger-ui-standalone-preset.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <script>
+      (function () {
+        // --- Config ---
+        const swaggerJsonUrl = "/swagger/v1/swagger.json"; // adjust if your doc name differs
+        const siteKeyEndpoint = "/_turnstile/sitekey"; // returns { siteKey, headerName }
+
+        // --- State ---
+        let turnstileHeaderName = "CF-Turnstile-Token";
+        let currentTurnstileToken = null;
+        let widgetId = null;
+
+        // --- DOM helpers ---
+        function ensureTopbarPanel() {
+          // Wait for Swagger UI to render, then inject our panel into the topbar
+          const topbar = document.querySelector("#swagger-ui .topbar .wrapper");
+          if (!topbar) return null;
+
+          let panel = document.querySelector("#turnstile-panel");
+          if (!panel) {
+            panel = document.createElement("div");
+            panel.id = "turnstile-panel";
+            panel.className = "turnstile-panel";
+
+            const widgetDiv = document.createElement("div");
+            widgetDiv.id = "turnstile-widget";
+            widgetDiv.className = "cf-turnstile";
+
+            const status = document.createElement("div");
+            status.id = "turnstile-status";
+            status.className = "turnstile-status ts-muted";
+            status.textContent = "Turnstile: not verified";
+
+            const refreshBtn = document.createElement("button");
+            refreshBtn.textContent = "Refresh";
+            refreshBtn.type = "button";
+            refreshBtn.style.cursor = "pointer";
+            refreshBtn.onclick = () => {
+              if (window.turnstile && widgetId !== null) {
+                window.turnstile.reset(widgetId);
+              }
+            };
+
+            panel.appendChild(widgetDiv);
+            panel.appendChild(status);
+            panel.appendChild(refreshBtn);
+            topbar.appendChild(panel);
+          }
+          return panel;
+        }
+
+        function setStatus(text, ok) {
+          const s = document.getElementById("turnstile-status");
+          if (!s) return;
+          s.textContent = text;
+          s.className =
+            "turnstile-status " +
+            (ok === true ? "ts-ok" : ok === false ? "ts-warn" : "ts-muted");
+        }
+
+        // --- Load Turnstile API script dynamically ---
+        function loadTurnstileApi() {
+          return new Promise((resolve, reject) => {
+            if (window.turnstile) return resolve(window.turnstile);
+            const s = document.createElement("script");
+            // render=explicit so we can control render after panel exists
+            s.src =
+              "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+            s.async = true;
+            s.defer = true;
+            s.onload = () => resolve(window.turnstile);
+            s.onerror = () => reject(new Error("Failed to load Turnstile API"));
+            document.head.appendChild(s);
+          });
+        }
+
+        // --- Fetch site key & header name from server ---
+        async function fetchSiteKey() {
+          const res = await fetch(siteKeyEndpoint, { cache: "no-store" });
+          if (!res.ok) throw new Error("Failed to fetch site key");
+          return res.json();
+        }
+
+        // --- Render the widget ---
+        function renderTurnstile(siteKey) {
+          const container = document.getElementById("turnstile-widget");
+          if (!container || !window.turnstile) return;
+
+          // Clear any previous widget (if present)
+          container.innerHTML = "";
+
+          widgetId = window.turnstile.render(container, {
+            sitekey: siteKey,
+            // Optional: set an "action" string for analytics in Turnstile dashboard
+            action: "swagger",
+            callback: function (token) {
+              currentTurnstileToken = token || null;
+              if (currentTurnstileToken) setStatus("Turnstile: verified", true);
+            },
+            "expired-callback": function () {
+              currentTurnstileToken = null;
+              setStatus("Turnstile: expired — click Refresh", false);
+            },
+            "error-callback": function () {
+              currentTurnstileToken = null;
+              setStatus("Turnstile: error — click Refresh", false);
+            },
+            theme: "auto",
+          });
+        }
+
+        // --- Bootstrap Swagger UI with a request interceptor that injects the token ---
+        function startSwaggerUI() {
+          const ui = SwaggerUIBundle({
+            url: swaggerJsonUrl,
+            dom_id: "#swagger-ui",
+            deepLinking: true,
+            presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+            plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+            layout: "StandaloneLayout",
+            requestInterceptor: function (req) {
+              // Attach token to every request if present
+              if (currentTurnstileToken && turnstileHeaderName) {
+                req.headers[turnstileHeaderName] = currentTurnstileToken;
+              }
+              return req;
+            },
+          });
+
+          // After UI renders, inject our topbar panel if not already there.
+          const observer = new MutationObserver(() => {
+            if (ensureTopbarPanel()) observer.disconnect();
+          });
+          observer.observe(document.getElementById("swagger-ui"), {
+            childList: true,
+            subtree: true,
+          });
+
+          window.ui = ui;
+        }
+
+        // --- Main flow ---
+        (async function init() {
+          // 1) Start Swagger UI first (so DOM exists)
+          startSwaggerUI();
+
+          try {
+            // 2) Get siteKey + headerName from server
+            const meta = await fetchSiteKey();
+            turnstileHeaderName =
+              meta && meta.headerName ? meta.headerName : turnstileHeaderName;
+
+            // 3) Ensure panel exists in topbar
+            ensureTopbarPanel();
+
+            // 4) Load API and render widget
+            await loadTurnstileApi();
+            if (!meta || !meta.siteKey) {
+              setStatus("Turnstile: siteKey missing on server", false);
+              return;
+            }
+            renderTurnstile(meta.siteKey);
+            setStatus("Solve the Turnstile challenge to send requests", null);
+          } catch (e) {
+            console.error(e);
+            setStatus("Turnstile: initialization failed", false);
+          }
+        })();
+      })();
+    </script>
+  </body>
+</html>
