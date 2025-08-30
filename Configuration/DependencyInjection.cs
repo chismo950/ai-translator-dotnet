@@ -21,19 +21,20 @@ namespace AiTranslatorDotnet.Configuration
             services
                 .AddOptions<GeminiOptions>()
                 .Bind(configuration.GetSection(GeminiOptions.SectionName))
-                .PostConfigure(o => o.Normalize())
-                .Validate(o =>
-                {
-                    try
-                    {
-                        o.Validate();
-                        return true;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                }, failureMessage: "Invalid Gemini configuration. Check 'Gemini' section in appsettings.");
+                .PostConfigure(o => o.Normalize());
+                // Temporarily removed validation to debug startup hang
+                //.Validate(o =>
+                //{
+                //    try
+                //    {
+                //        o.Validate();
+                //        return true;
+                //    }
+                //    catch
+                //    {
+                //        return false;
+                //    }
+                //}, failureMessage: "Invalid Gemini configuration. Check 'Gemini' section in appsettings.");
 
             // Typed HttpClient for GeminiClient
             services.AddHttpClient<GeminiClient>((sp, http) =>

@@ -67,10 +67,10 @@ namespace AiTranslatorDotnet.KeyManagement
         private static void ShuffleInPlace<T>(T[] array)
         {
             using var rng = RandomNumberGenerator.Create();
+            Span<byte> bytes = stackalloc byte[4];
             for (int n = array.Length; n > 1; n--)
             {
                 // Generate uniform random index in [0, n)
-                Span<byte> bytes = stackalloc byte[4];
                 rng.GetBytes(bytes);
                 int k = BitConverter.ToInt32(bytes) & int.MaxValue;
                 int j = k % n;
