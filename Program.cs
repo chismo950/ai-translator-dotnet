@@ -57,7 +57,7 @@ app.MapTurnstileEndpoints(); // exposes GET /_turnstile/sitekey for the Swagger 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
    .WithName("Health");
 
-app.MapGet("/", () => "v1");
+app.MapGet("/", () => "v2");
 
 // Start the app
 app.Run();
