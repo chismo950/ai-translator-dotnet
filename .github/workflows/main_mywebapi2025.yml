@@ -1,7 +1,7 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 
-name: Build and deploy ASP.Net Core app to Azure Web App - aitranslator
+name: Build and deploy ASP.Net Core app to Azure Web App - mywebapi2025
 
 on:
   push:
@@ -51,15 +51,15 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_D6D9F5ABB68344FE80135A2CB2DEAA16 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D66EE42D25A84A63BB0DBE148E8DC9A3 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_AFBF71D3DB464414BB64F004CE80DC93 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A35C1FB190CE41B2BD5C6D13EA2D8874 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_DDF9822B020447D2A34FCCFF326589F4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_F929610670A548F28333C834A12163B8 }}
 
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'aitranslator'
+          app-name: 'mywebapi2025'
           slot-name: 'Production'
           package: .
           
