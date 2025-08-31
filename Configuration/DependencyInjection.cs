@@ -93,7 +93,8 @@ namespace AiTranslatorDotnet.Configuration
 
                     policy.AllowAnyMethod()
                           .AllowAnyHeader()
-                          .AllowCredentials();
+                          .AllowCredentials()
+                          .WithExposedHeaders("X-Turnstile-Pass");
                 });
             });
 

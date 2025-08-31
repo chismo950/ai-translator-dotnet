@@ -3,15 +3,9 @@ using Microsoft.Extensions.Options;
 namespace AiTranslatorDotnet.Security.Turnstile
 {
     /// <summary>
-    /// Minimal API endpoint filter that enforces Cloudflare Turnstile verification.
-    /// Reads the token from a request header (default: "CF-Turnstile-Token") and
-    /// verifies it via TurnstileVerifier before allowing the request to proceed.
-    ///
-    /// Usage (in your endpoint mapping code):
-    ///     group.MapPost("/v1/translate", TranslateAsync)
-    ///          .RequireTurnstile();
-    ///
-    /// Enforcement is controlled by TurnstileOptions.
+    /// Endpoint filter that enforces Cloudflare Turnstile.
+    /// Adds support for a short-lived "pass" that, when valid, allows skipping Turnstile
+    /// for a limited time or number of uses.
     /// </summary>
     public sealed class TurnstileEndpointFilter : IEndpointFilter
     {
@@ -19,14 +13,22 @@ namespace AiTranslatorDotnet.Security.Turnstile
         private readonly IOptions<TurnstileOptions> _options;
         private readonly ILogger<TurnstileEndpointFilter> _logger;
 
+        // Optional pass service and options (enabled via AddTurnstilePass)
+        private readonly TurnstilePassService? _passService;
+        private readonly IOptions<TurnstilePassOptions>? _passOptions;
+
         public TurnstileEndpointFilter(
             TurnstileVerifier verifier,
             IOptions<TurnstileOptions> options,
-            ILogger<TurnstileEndpointFilter> logger)
+            ILogger<TurnstileEndpointFilter> logger,
+            TurnstilePassService? passService = null,
+            IOptions<TurnstilePassOptions>? passOptions = null)
         {
             _verifier = verifier;
             _options = options;
             _logger = logger;
+            _passService = passService;
+            _passOptions = passOptions;
         }
 
         public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -34,17 +36,32 @@ namespace AiTranslatorDotnet.Security.Turnstile
             var http = context.HttpContext;
             var opts = _options.Value;
 
-            // Feature toggle: skip when disabled.
+            // Feature toggle: when disabled, do not enforce Turnstile (and ignore pass).
             if (!opts.RequireOnTranslate)
                 return await next(context);
 
-            // Skip (with warning) if SecretKey is not configured to avoid breaking local runs.
+            // Fail hard if Turnstile is required but SecretKey is missing.
             if (string.IsNullOrWhiteSpace(opts.SecretKey))
             {
-                _logger.LogWarning("Turnstile SecretKey is not configured; skipping verification.");
-                return await next(context);
+                _logger.LogError("Turnstile SecretKey is not configured. Refusing request.");
+                return Results.Problem(
+                    title: "Turnstile is required but not configured.",
+                    detail: "Missing Turnstile SecretKey. Set TURNSTILE__SECRETKEY (env) and restart.",
+                    statusCode: StatusCodes.Status500InternalServerError);
             }
 
+            // ---- STEP 1: Try to consume a short-lived pass (if enabled) ----
+            var passEnabled = _passService is not null && _passOptions?.Value?.Enabled == true;
+            if (passEnabled)
+            {
+                if (_passService!.TryConsume(http, out var reason))
+                {
+                    // Valid pass: skip Turnstile and proceed
+                    return await next(context);
+                }
+            }
+
+            // ---- STEP 2: Enforce Turnstile verification ----
             var headerName = string.IsNullOrWhiteSpace(opts.HeaderName) ? "CF-Turnstile-Token" : opts.HeaderName;
 
             string? token = null;
@@ -57,7 +74,6 @@ namespace AiTranslatorDotnet.Security.Turnstile
 
             if (!result.IsValid)
             {
-                // Missing token -> 400; present but invalid -> 403.
                 var status = token is null ? StatusCodes.Status400BadRequest : StatusCodes.Status403Forbidden;
 
                 return Results.Problem(
@@ -71,29 +87,42 @@ namespace AiTranslatorDotnet.Security.Turnstile
                     });
             }
 
+            // ---- STEP 3: Issue a pass on successful verification (if enabled) ----
+            if (passEnabled)
+            {
+                var passToken = _passService!.IssueFor(http);
+                var passHeader = string.IsNullOrWhiteSpace(_passOptions!.Value.HeaderName)
+                    ? "X-Turnstile-Pass"
+                    : _passOptions.Value.HeaderName;
+
+                // Return the pass to the client; client should present it in subsequent requests.
+                http.Response.Headers[passHeader] = passToken;
+            }
+
             return await next(context);
         }
     }
 
     /// <summary>
-    /// Extensions to conveniently apply the filter with DI-resolved dependencies.
+    /// Extensions to apply the filter with DI-resolved dependencies.
     /// </summary>
     public static class TurnstileEndpointFilterExtensions
     {
-        /// <summary>
-        /// Adds a filter-factory that resolves Turnstile dependencies from DI and enforces verification.
-        /// </summary>
         public static RouteHandlerBuilder RequireTurnstile(this RouteHandlerBuilder builder)
         {
             return builder.AddEndpointFilterFactory((factoryContext, next) =>
             {
                 var sp = factoryContext.ApplicationServices;
 
-                var verifier = sp.GetRequiredService<TurnstileVerifier>();
-                var options = sp.GetRequiredService<IOptions<TurnstileOptions>>();
-                var logger = sp.GetRequiredService<ILogger<TurnstileEndpointFilter>>();
+                var verifier   = sp.GetRequiredService<TurnstileVerifier>();
+                var options    = sp.GetRequiredService<IOptions<TurnstileOptions>>();
+                var logger     = sp.GetRequiredService<ILogger<TurnstileEndpointFilter>>();
 
-                var filter = new TurnstileEndpointFilter(verifier, options, logger);
+                // Pass service is optional: only present if AddTurnstilePass() was called
+                var passSvcOpt = sp.GetService<TurnstilePassService>();
+                var passOpt    = sp.GetService<IOptions<TurnstilePassOptions>>();
+
+                var filter = new TurnstileEndpointFilter(verifier, options, logger, passSvcOpt, passOpt);
                 return ctx => filter.InvokeAsync(ctx, next);
             });
         }

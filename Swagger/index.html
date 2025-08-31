@@ -4,12 +4,9 @@
     <meta charset="UTF-8" />
     <title>API Docs</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-    <!-- Swagger UI assets served by Swashbuckle at /swagger/* -->
     <link rel="stylesheet" type="text/css" href="/swagger/swagger-ui.css" />
 
     <style>
-      /* Place a small Turnstile panel in the Swagger topbar */
       .turnstile-panel {
         display: flex;
         align-items: center;
@@ -32,7 +29,6 @@
       .ts-muted {
         color: #666;
       }
-      /* Keep widget compact */
       .cf-turnstile {
         transform: scale(0.95);
         transform-origin: left center;
@@ -41,8 +37,6 @@
   </head>
   <body>
     <div id="swagger-ui"></div>
-
-    <!-- Turnstile API will be loaded dynamically (so we can fetch siteKey first) -->
 
     <script
       src="/swagger/swagger-ui-bundle.js"
@@ -56,17 +50,23 @@
     <script>
       (function () {
         // --- Config ---
-        const swaggerJsonUrl = "/swagger/v1/swagger.json"; // adjust if your doc name differs
+        const swaggerJsonUrl = "/swagger/v1/swagger.json";
         const siteKeyEndpoint = "/_turnstile/sitekey"; // returns { siteKey, headerName }
+        const PASS_HEADER = "X-Turnstile-Pass"; // must match server TurnstilePassOptions.HeaderName
 
         // --- State ---
-        let turnstileHeaderName = "CF-Turnstile-Token";
-        let currentTurnstileToken = null;
+        let turnstileHeaderName = "CF-Turnstile-Token"; // Turnstile token header (from server meta)
+        let currentTurnstileToken = null; // Turnstile token (short-lived)
+        let passToken = null; // short-lived pass issued by server
         let widgetId = null;
+
+        // Optional manual gating (require user click)
+        let manualArm = false;
+        let lastSolvedAt = 0;
+        const maxTokenAgeMs = 60_000;
 
         // --- DOM helpers ---
         function ensureTopbarPanel() {
-          // Wait for Swagger UI to render, then inject our panel into the topbar
           const topbar = document.querySelector("#swagger-ui .topbar .wrapper");
           if (!topbar) return null;
 
@@ -83,21 +83,46 @@
             const status = document.createElement("div");
             status.id = "turnstile-status";
             status.className = "turnstile-status ts-muted";
-            status.textContent = "Turnstile: not verified";
+            status.textContent = "Turnstile: click Verify (or use server pass)";
+
+            const verifyBtn = document.createElement("button");
+            verifyBtn.textContent = "Verify";
+            verifyBtn.type = "button";
+            verifyBtn.style.cursor = "pointer";
+            verifyBtn.onclick = () => {
+              manualArm = true;
+              lastSolvedAt = 0;
+              currentTurnstileToken = null;
+              setStatus("Turnstile: please complete verification...", null);
+              if (window.turnstile && widgetId !== null)
+                window.turnstile.reset(widgetId);
+            };
 
             const refreshBtn = document.createElement("button");
             refreshBtn.textContent = "Refresh";
             refreshBtn.type = "button";
             refreshBtn.style.cursor = "pointer";
             refreshBtn.onclick = () => {
-              if (window.turnstile && widgetId !== null) {
+              currentTurnstileToken = null;
+              setStatus("Turnstile: refreshed — click Verify to proceed", null);
+              if (window.turnstile && widgetId !== null)
                 window.turnstile.reset(widgetId);
-              }
+            };
+
+            const clearPassBtn = document.createElement("button");
+            clearPassBtn.textContent = "Clear Pass";
+            clearPassBtn.type = "button";
+            clearPassBtn.style.cursor = "pointer";
+            clearPassBtn.onclick = () => {
+              passToken = null;
+              setStatus("Turnstile: pass cleared — please Verify", null);
             };
 
             panel.appendChild(widgetDiv);
             panel.appendChild(status);
+            panel.appendChild(verifyBtn);
             panel.appendChild(refreshBtn);
+            panel.appendChild(clearPassBtn);
             topbar.appendChild(panel);
           }
           return panel;
@@ -112,12 +137,11 @@
             (ok === true ? "ts-ok" : ok === false ? "ts-warn" : "ts-muted");
         }
 
-        // --- Load Turnstile API script dynamically ---
+        // --- Load Turnstile API ---
         function loadTurnstileApi() {
           return new Promise((resolve, reject) => {
             if (window.turnstile) return resolve(window.turnstile);
             const s = document.createElement("script");
-            // render=explicit so we can control render after panel exists
             s.src =
               "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
             s.async = true;
@@ -128,42 +152,139 @@
           });
         }
 
-        // --- Fetch site key & header name from server ---
+        // --- Fetch site key meta ---
         async function fetchSiteKey() {
           const res = await fetch(siteKeyEndpoint, { cache: "no-store" });
           if (!res.ok) throw new Error("Failed to fetch site key");
           return res.json();
         }
 
-        // --- Render the widget ---
+        // --- Render Turnstile widget ---
         function renderTurnstile(siteKey) {
           const container = document.getElementById("turnstile-widget");
           if (!container || !window.turnstile) return;
-
-          // Clear any previous widget (if present)
           container.innerHTML = "";
 
           widgetId = window.turnstile.render(container, {
             sitekey: siteKey,
-            // Optional: set an "action" string for analytics in Turnstile dashboard
             action: "swagger",
             callback: function (token) {
+              // Accept token only if user clicked Verify
+              if (!manualArm) {
+                currentTurnstileToken = null;
+                setStatus("Turnstile: click Verify to generate a token", false);
+                return;
+              }
               currentTurnstileToken = token || null;
-              if (currentTurnstileToken) setStatus("Turnstile: verified", true);
+              lastSolvedAt = Date.now();
+              manualArm = false;
+              if (currentTurnstileToken)
+                setStatus("Turnstile: verified (manual)", true);
             },
             "expired-callback": function () {
               currentTurnstileToken = null;
-              setStatus("Turnstile: expired — click Refresh", false);
+              setStatus("Turnstile: expired — click Verify", false);
             },
             "error-callback": function () {
               currentTurnstileToken = null;
-              setStatus("Turnstile: error — click Refresh", false);
+              setStatus("Turnstile: error — click Verify", false);
             },
             theme: "auto",
           });
         }
 
-        // --- Bootstrap Swagger UI with a request interceptor that injects the token ---
+        // --- Helpers for headers ---
+        function getHeader(res, name) {
+          const headers = res && res.headers;
+          if (!headers) return null;
+          const lower = name.toLowerCase();
+
+          try {
+            // Fetch Headers API
+            if (typeof headers.get === "function") {
+              return headers.get(name) || headers.get(lower) || null;
+            }
+            // Plain object format (swagger-client sometimes flattens)
+            for (const key in headers) {
+              if (
+                Object.prototype.hasOwnProperty.call(headers, key) &&
+                key.toLowerCase() === lower
+              ) {
+                const v = headers[key];
+                if (Array.isArray(v)) return v[0] ?? null;
+                if (v && typeof v === "object" && "value" in v) return v.value;
+                return v ?? null;
+              }
+            }
+          } catch (_) {
+            /* ignore */
+          }
+          return null;
+        }
+
+        // --- Interceptors ---
+        const requestInterceptor = function (req) {
+          const href = new URL(req.url, window.location.origin);
+          const path = href.pathname || "";
+
+          // Allowlist swagger assets + sitekey endpoint
+          const isSwaggerAsset =
+            path.startsWith("/swagger/") ||
+            path.endsWith("/swagger/v1/swagger.json");
+          const isTurnstileMeta = path === "/_turnstile/sitekey";
+          if (isSwaggerAsset || isTurnstileMeta) {
+            return req;
+          }
+
+          // Only gate your business API
+          const isApiCall = path.startsWith("/v1/");
+          if (!isApiCall) {
+            return req;
+          }
+
+          // Use server-issued pass first
+          if (passToken) {
+            req.headers[PASS_HEADER] = passToken;
+            return req;
+          }
+
+          // Otherwise require a fresh token (after user clicked Verify)
+          const fresh =
+            currentTurnstileToken && Date.now() - lastSolvedAt <= maxTokenAgeMs;
+          if (!fresh) {
+            setStatus("Turnstile: click Verify to proceed", false);
+            throw new Error("Turnstile token missing or stale");
+          }
+          if (turnstileHeaderName) {
+            req.headers[turnstileHeaderName] = currentTurnstileToken;
+          }
+          return req;
+        };
+
+        const responseInterceptor = function (res) {
+          try {
+            // Capture new pass if server issued one
+            const issued = getHeader(res, PASS_HEADER);
+            if (issued && typeof issued === "string") {
+              passToken = issued;
+              setStatus("Server pass active (using " + PASS_HEADER + ")", true);
+            }
+
+            // On auth/verification errors, clear pass and prompt
+            if (res && (res.status === 400 || res.status === 403)) {
+              passToken = null;
+              setStatus("Verification required — please click Verify", false);
+              if (window.turnstile && widgetId !== null)
+                window.turnstile.reset(widgetId);
+            }
+          } catch (e) {
+            // Never break Swagger rendering due to header parsing issues
+            console.warn("responseInterceptor warning:", e);
+          }
+          return res;
+        };
+
+        // --- Start Swagger UI ---
         function startSwaggerUI() {
           const ui = SwaggerUIBundle({
             url: swaggerJsonUrl,
@@ -172,16 +293,10 @@
             presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
             plugins: [SwaggerUIBundle.plugins.DownloadUrl],
             layout: "StandaloneLayout",
-            requestInterceptor: function (req) {
-              // Attach token to every request if present
-              if (currentTurnstileToken && turnstileHeaderName) {
-                req.headers[turnstileHeaderName] = currentTurnstileToken;
-              }
-              return req;
-            },
+            requestInterceptor: requestInterceptor,
+            responseInterceptor: responseInterceptor,
           });
 
-          // After UI renders, inject our topbar panel if not already there.
           const observer = new MutationObserver(() => {
             if (ensureTopbarPanel()) observer.disconnect();
           });
@@ -193,28 +308,24 @@
           window.ui = ui;
         }
 
-        // --- Main flow ---
+        // --- Main bootstrap ---
         (async function init() {
-          // 1) Start Swagger UI first (so DOM exists)
           startSwaggerUI();
 
           try {
-            // 2) Get siteKey + headerName from server
             const meta = await fetchSiteKey();
             turnstileHeaderName =
               meta && meta.headerName ? meta.headerName : turnstileHeaderName;
 
-            // 3) Ensure panel exists in topbar
             ensureTopbarPanel();
 
-            // 4) Load API and render widget
             await loadTurnstileApi();
             if (!meta || !meta.siteKey) {
               setStatus("Turnstile: siteKey missing on server", false);
               return;
             }
             renderTurnstile(meta.siteKey);
-            setStatus("Solve the Turnstile challenge to send requests", null);
+            setStatus("Turnstile: click Verify (or use server pass)", null);
           } catch (e) {
             console.error(e);
             setStatus("Turnstile: initialization failed", false);

@@ -22,6 +22,9 @@ builder.Services.AddCorsConfiguration(builder.Configuration);
 // Register Cloudflare Turnstile services
 builder.Services.AddTurnstile(builder.Configuration);
 
+// Register Turnstile Pass services
+builder.Services.AddTurnstilePass(builder.Configuration);
+
 var app = builder.Build();
 
 // Global exception handling should be as early as possible
