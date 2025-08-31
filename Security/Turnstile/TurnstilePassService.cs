@@ -107,7 +107,7 @@ namespace AiTranslatorDotnet.Security.Turnstile
                 return false;
             }
 
-            if (!_cache.TryGetValue<PassRecord>(token!, out var record))
+            if (!_cache.TryGetValue<PassRecord>(token!, out var record) || record == null)
             {
                 reason = "unknown-or-expired-pass";
                 return false;
